@@ -7,9 +7,10 @@
   "license": "MIT",
   "private": false,
   "scripts": {
-    "prepare": "tsc",
-    "build": "tsc",
     "start": "ts-node-transpile-only src/index.ts",
     "test": "echo 'No tests for the project (yet)'"
+  },
+  "dependencies": {
+    "sqlite3": "^5.1.6"
   }
 }
