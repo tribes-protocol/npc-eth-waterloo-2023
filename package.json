@@ -5,5 +5,11 @@
   "repository": "git@github.com:tribes-protocol/npc.git",
   "author": "Hish Bouabdallah <hishboy@gmail.com>",
   "license": "MIT",
-  "private": false
+  "private": false,
+  "scripts": {
+    "prepare": "tsc",
+    "build": "tsc",
+    "start": "ts-node-transpile-only src/index.ts",
+    "test": "echo 'No tests for the project (yet)'"
+  }
 }
