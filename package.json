@@ -1,0 +1,9 @@
+{
+  "name": "npc",
+  "version": "1.0.0",
+  "main": "index.js",
+  "repository": "git@github.com:tribes-protocol/npc.git",
+  "author": "Hish Bouabdallah <hishboy@gmail.com>",
+  "license": "MIT",
+  "private": false
+}
