@@ -59,18 +59,6 @@ export class Memory {
         }
       })
     })
-
-    // await new Promise<void>((resolve, reject) => {
-    //   this.db.run(createMessagePositionsTableQuery, (error) => {
-    //     if (error) {
-    //       console.error('Error creating message_positions table:', error);
-    //       reject(error);
-    //     } else {
-    //       console.log('Table message_positions created successfully.');
-    //       resolve();
-    //     }
-    //   })
-    // })
   }
 
   private async getMessagePosition(channelId: ChannelId): Promise<number> {
@@ -113,10 +101,10 @@ export class Memory {
           highestSequenceNumber = Math.max(highestSequenceNumber, message.sequence)
         }
       } while (cursor)
-
+      
+      // put highest message into table
       await this.putPosition(channelId, highestSequenceNumber)
 
-      // put highest message into table
     } catch (e: any) {
       console.error(`Error syncing channel ${channelId.raw}: ${e.message} `, e)
     }
@@ -128,7 +116,7 @@ export class Memory {
       SELECT * FROM message WHERE content LIKE ? LIMIT ?
         `
 
-      const searchParam = `% ${query}% `
+      const searchParam = `%${query}%`
       this.db.all(searchQuery, [searchParam, limit], (error, rows: { [key: string]: any }[]) => {
         if (error) {
           reject(error)

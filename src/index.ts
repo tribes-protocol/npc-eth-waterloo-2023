@@ -48,8 +48,6 @@ async function main() {
     const envPath = path.join(__dirname, '.env')
     await NPC.login({ envPath })
   })
-
-  
 }
 
 main()
