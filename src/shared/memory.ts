@@ -141,10 +141,17 @@ export class Memory {
   async putPosition(channelId: ChannelId, sequence: number): Promise<void> {
     return new Promise((resolve, reject) => {
       const insertQuery = `
-    INSERT OR REPLACE INTO message_positions(channelId, position)
-      VALUES(?, ?)
+      INSERT or REPLACE INTO message_positions (channelId, position)
+      SELECT ?, ?
+      WHERE NOT EXISTS (
+        SELECT 1 FROM message_positions WHERE channelId = ? AND position >= ?
+      )
+      OR (
+        SELECT position FROM message_positions WHERE channelId = ?
+      ) < ?
         `
-      const values = [channelId.raw, sequence]
+
+      const values = [channelId.raw, sequence, channelId.raw, sequence, channelId.raw, sequence]
 
       this.db.run(insertQuery, values, function (error) {
         if (error) {
@@ -156,7 +163,6 @@ export class Memory {
       })
     })
   }
-
 
   async put(data: Message): Promise<void> {
     return new Promise((resolve, reject) => {
