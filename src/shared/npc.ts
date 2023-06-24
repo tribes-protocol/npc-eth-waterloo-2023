@@ -3,7 +3,7 @@ import 'cross-fetch/polyfill'
 import dotenv from 'dotenv'
 import { ec as EC } from 'elliptic'
 import { ethers } from 'ethers'
-import { ChatCompletionRequestMessage, Configuration, OpenAIApi } from 'openai'
+import { ChatCompletionFunctions, ChatCompletionRequestMessage, Configuration, OpenAIApi } from 'openai'
 import path from 'path'
 import { Secp256k1, Secp256k1PublicKey } from '../cryptography/secp256k1'
 import { EIP6551 } from '../ethereum/eip6551'
@@ -15,9 +15,9 @@ import { WebSocketConnection } from '../networking/websocket'
 import { npcSystemPrompt, personalityProfileFromERC721Metadata } from "../prompts/personality"
 import { kTribesWSAPI } from './constants'
 import { Disk } from './disk'
-import { asNumber, asString, isNull } from './functions'
+import { asNumber, asString, isNull, toJsonTree } from './functions'
 import { Memory } from "./memory"
-import { ChannelId, EthChain, EthNFTAddress, EthWalletAddress, Message, proofToMessage } from './types'
+import { EthChain, EthNFTAddress, EthWalletAddress, Message, proofToMessage } from './types'
 
 const ec = new EC('secp256k1')
 
@@ -194,12 +194,6 @@ export class NPC {
     websocket.connect(jwt)
 
     console.log(`NPC ${account.value} logged in!`)
-
-
-    await npc.memory.sync(new ChannelId("direct:0x1ab7a986e32e46d40b469cfa38e11eb2fd9fcdbe_0xe69f609c75f8640fa034166c63929f2875c01343/message"))
-    const channelId = new ChannelId("direct:0x1ab7a986e32e46d40b469cfa38e11eb2fd9fcdbe_0xe69f609c75f8640fa034166c63929f2875c01343/message")
-    const recents = await npc.memory.getRecentMessages(channelId, 100, 'ASC')
-
     return npc
   }
 
@@ -258,7 +252,7 @@ export class NPC {
 
   async llm(message: Message): Promise<string | undefined> {
     const recents = [
-      ...(await this.memory.getRecentMessages(message.channelId, 33, 'ASC')),
+      ...(await this.memory.getRecentMessages(message.channelId, 5, 'DESC')),
       message
     ]
     const messages: ChatCompletionRequestMessage[] = recents.map((r) => {
@@ -267,16 +261,69 @@ export class NPC {
         content: r.content,
       }
     })
-    const completion = await this.openai.createChatCompletion({
-      model: 'gpt-3.5-turbo-0613',
-      messages: [
-        { 'role': 'system', 'content': this.systemPrompt },
-        ...messages
-      ],
-      temperature: 0,
-    })
-    const response = completion.data.choices[0].message
-    const content = response?.content?.trim()
-    return content
+
+    const functions: ChatCompletionFunctions[] = [
+      {
+        name: 'search_messages',
+        description: 'Use this to search all chat history or if you want to lookup something that happened in the past',
+        parameters: {
+          type: 'object',
+          properties: {
+            query: {
+              type: 'string',
+              description: 'A string query to use for searching'
+            }
+          },
+          required: ['query']
+        }
+      },
+    ]
+
+    let limit = 0
+    do {
+      const completion = await this.openai.createChatCompletion({
+        model: 'gpt-3.5-turbo-0613',
+        messages: [
+          { 'role': 'system', 'content': this.systemPrompt },
+          ...messages
+        ],
+        temperature: 0,
+        functions,
+        function_call: 'auto'
+      })
+
+      const response = completion.data.choices[0].message
+      const functionCall = response?.function_call
+
+      if (
+        response?.role === 'assistant' &&
+        !isNull(functionCall) &&
+        functionCall.name === 'search_messages'
+      ) {
+        messages.push(response)
+
+        const params = JSON.parse(functionCall.arguments ?? '{}')
+        const query = params.query
+        if (isNull(query) || query.trim().length === 0) {
+          break
+        }
+        const searchResults = this.memory.search(message.channelId, query, 5)
+
+        messages.push({
+          role: 'function',
+          name: functionCall.name,
+          content: JSON.stringify({
+            results: (await searchResults).map(toJsonTree)
+          })
+        })
+      } else {
+        const content = response?.content?.trim()
+        return content
+      }
+
+      limit++
+    } while (limit < 10)
+
+    return undefined
   }
 }

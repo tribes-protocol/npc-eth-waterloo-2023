@@ -73,28 +73,29 @@ export class Memory {
           await this.put(message)
         }
       } while (cursor)
-
-      console.log(`Synced all messages for channel ${channelId.raw}`)
     } catch (e: any) {
       console.error(`Error syncing channel ${channelId.raw}: ${e.message}`, e)
     }
   }
 
-  async search(query: string, limit: number): Promise<Message[]> {
+  async search(channelId: ChannelId, query: string, limit: number): Promise<Message[]> {
     return new Promise((resolve, reject) => {
       const searchQuery = `
-        SELECT * FROM message WHERE content LIKE ? LIMIT ?
+        SELECT * FROM message WHERE  channelId = ? AND content LIKE ? LIMIT ?
       `
 
       const searchParam = `%${query}%`
-      this.db.all(searchQuery, [searchParam, limit], (error, rows: { [key: string]: any }[]) => {
-        if (error) {
-          reject(error)
-        } else {
-          const messages: Message[] = rows.map(asMessage)
-          resolve(messages)
-        }
-      })
+      this.db.all(
+        searchQuery,
+        [channelId.raw, searchParam, limit],
+        (error, rows: { [key: string]: any }[]) => {
+          if (error) {
+            reject(error)
+          } else {
+            const messages: Message[] = rows.map(asMessage)
+            resolve(messages)
+          }
+        })
     })
   }
 
