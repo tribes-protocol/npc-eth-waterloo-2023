@@ -40,7 +40,8 @@ export class Memory {
       author VARCAR(255) NOT NULL,
       content TEXT NOT NULL,
       timestamp INTEGER NOT NULL,
-      channelId TEXT NOT NULL
+      channelId TEXT NOT NULL,
+      sequence INTEGER NOT NULL
     );
     CREATE TABLE IF NOT EXISTS message_positions (
       channelId TEXT NOT NULL PRIMARY KEY,
@@ -160,12 +161,12 @@ export class Memory {
   async put(data: Message): Promise<void> {
     return new Promise((resolve, reject) => {
       const insertQuery = `
-          INSERT OR IGNORE INTO message(id, author, content, timestamp, channelId)
-      VALUES(?, ?, ?, ?, ?)
+          INSERT OR IGNORE INTO message(id, author, content, timestamp, channelId, sequence)
+      VALUES(?, ?, ?, ?, ?, ?)
       `
 
       const { id, author, content, timestamp, channelId } = data
-      const values = [id, author.value, content, timestamp, channelId.raw]
+      const values = [id, author.value, content, timestamp, channelId.raw, data.sequence]
 
       this.db.run(insertQuery, values, function (error) {
         if (error) {
@@ -181,7 +182,8 @@ export class Memory {
   async getRecentMessages(channelId: ChannelId, limit: number, order: 'DESC' | 'ASC'): Promise<Message[]> {
     return new Promise((resolve, reject) => {
       const selectQuery = `
-      SELECT * FROM message
+      SELECT * 
+         FROM message
         WHERE channelId = ?
         ORDER BY timestamp ${order}
       LIMIT ?
