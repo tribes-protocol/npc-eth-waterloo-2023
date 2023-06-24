@@ -120,21 +120,17 @@ export class Memory {
         `
 
       const searchParam = `%${query}%`
-      this.db.all(searchQuery, [channelId.raw, searchParam, limit], (error, rows: { [key: string]: any }[]) => {
-        if (error) {
-          reject(error)
-        } else {
-          const messages: Message[] = rows.map(row => ({
-            id: row['id'],
-            author: row['author'],
-            content: row['content'],
-            timestamp: row['timestamp'],
-            channelId: row['channelId'],
-            sequence: row['sequence']
-          }))
-          resolve(messages)
-        }
-      })
+      this.db.all(
+        searchQuery,
+        [channelId.raw, searchParam, limit],
+        (error, rows: { [key: string]: any }[]) => {
+          if (error) {
+            reject(error)
+          } else {
+            const messages: Message[] = rows.map(asMessage)
+            resolve(messages)
+          }
+        })
     })
   }
 

@@ -2,7 +2,6 @@ import 'cross-fetch/polyfill'
 import express from 'express'
 import path from 'path'
 import { NPC } from './shared/npc'
-import { Memory } from './shared/memory'
 
 
 const app = express()
