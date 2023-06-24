@@ -12,8 +12,13 @@ import { kTribesWSAPI } from './constants'
 import { Disk } from './disk'
 import { asNumber, asString, isNull } from './functions'
 import { EthNFTAddress, EthWalletAddress } from './types'
-
+import { Network, Alchemy } from "alchemy-sdk";
+import { EthChain } from './types'
 const ec = new EC('secp256k1')
+
+
+// how to extract the api key and make sure you can reference it from npc class
+
 
 export class NPC {
   private readonly openaiAPIKey: string
@@ -21,6 +26,7 @@ export class NPC {
   readonly nft: EthNFTAddress
   readonly owner: EthWalletAddress
   readonly wallet: ethers.HDNodeWallet
+  readonly alchemyAPIKey: string
 
   private constructor(
     params: {
@@ -28,12 +34,14 @@ export class NPC {
       openaiAPIKey: string,
       owner: EthWalletAddress,
       wallet: ethers.HDNodeWallet
+      alchemyAPIKey: string
     }
   ) {
     this.nft = params.nft
     this.openaiAPIKey = params.openaiAPIKey
     this.owner = params.owner
     this.wallet = params.wallet
+    this.alchemyAPIKey = params.alchemyAPIKey
   }
 
   static async login(opts: { envPath?: string } = {}) {
@@ -50,7 +58,7 @@ export class NPC {
     const nftChainId = asNumber(Number(process.env.NFT_CHAIN_ID))
     const nftContract = new EthWalletAddress(asString(process.env.NFT_CONTRACT))
     const nftTokenId = asString(process.env.NFT_TOKEN_ID)
-
+    
     // get the NFT owner
     const owner = await ERC721.getOwner({
       chainId: nftChainId,
@@ -96,6 +104,13 @@ export class NPC {
 
     console.log('NPC logged in!')
 
+      const metadata = await this.getERC721Metadata(nftChainId,
+        nftContract,
+        nftTokenId,
+        asString(process.env.ALCHEMY_POLYGON_API_KEY)
+        )
+        console.log(metadata)
+
     return new NPC({
       nft: {
         chainId: nftChainId,
@@ -105,6 +120,24 @@ export class NPC {
       openaiAPIKey: asString(process.env.OPENAI_API_KEY),
       owner,
       wallet,
+      alchemyAPIKey: asString(process.env.ALCHEMY_POLYGON_API_KEY)
     })
+  }
+
+  private static  async getERC721Metadata(chainId: EthChain, contractAddress: EthWalletAddress, tokenId: string, apiKey: string): Promise<any> {
+    // Optional Config object, but defaults to demo api-key and eth-mainnet.
+  const settings = {
+     apiKey: apiKey, // Replace with your Alchemy API Key.
+      network: Network.ETH_MAINNET, // Replace with your network.
+  };
+
+  const alchemy = new Alchemy(settings);
+
+// Print NFT metadata returned in the response:
+  alchemy.nft.getNftMetadata(
+     contractAddress.value,
+     tokenId
+  ).then(console.log);
+
   }
 }
