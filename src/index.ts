@@ -1,26 +1,21 @@
-import { Store } from "./database/store"
-import { SearchableMessage } from "./database/types"
+import 'cross-fetch/polyfill'
+import express from 'express'
+import path from 'path'
+import { NPC } from './shared/npc'
 
-
-
+const app = express()
+const port = 42069
 
 async function main() {
-  console.log('Hello NPC World!')
+  app.get('/heartbeat', async (req, res) => {
+    res.json({ heartbeat: Date.now() })
+  })
 
-  const store = new Store('zane')
-
-  const model: SearchableMessage = {
-    id: '1',
-    author: 'zane',
-    content: 'my first db project',
-    timestamp: Date.now()
-  }
-
-  await store.put(model)
-
-  const results = await store.search('project')
-
-  console.log(`results`, results)
+  app.listen(port, async () => {
+    console.log('ⵣ NPC starting')
+    const envPath = path.join(__dirname, '.env')
+    await NPC.login({ envPath })
+  })
 }
 
 main()

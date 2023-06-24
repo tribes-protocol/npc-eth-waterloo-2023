@@ -2,7 +2,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import sqlite3 from 'sqlite3'
-import { SearchableMessage } from './types'
+import { SearchableMessage } from '../shared/types'
 
 export class Store {
   private readonly db: sqlite3.Database
