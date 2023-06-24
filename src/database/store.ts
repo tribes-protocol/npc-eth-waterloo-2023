@@ -66,20 +66,18 @@ static async create(uuid: string): Promise<Store> {
     })
   }
 
- // store = new Store('Zane');
-  // for future testing purposes
 
-  // Execute a SELECT query on the table
 
 
 
   public async search(query: string, limit: number): Promise<SearchableMessage[]> {
     return new Promise((resolve, reject) => {
       const searchQuery = `
-        SELECT * FROM message WHERE content LIKE '%${query}%' LIMIT ${limit}
+        SELECT * FROM message WHERE content LIKE ? LIMIT ?
       `;
   
-      this.db.all(searchQuery, [], (error, rows: { [key: string]: any }[]) => {
+      const searchParam = `%${query}%`;
+      this.db.all(searchQuery, [searchParam, limit], (error, rows: { [key: string]: any }[]) => {
         if (error) {
           reject(error);
         } else {
@@ -94,7 +92,7 @@ static async create(uuid: string): Promise<Store> {
       });
     });
   }  
-    //throw new Error('Not implemented')
+   
   
     public async put(data: SearchableMessage): Promise<void> {
       return new Promise((resolve, reject) => {
@@ -120,7 +118,7 @@ static async create(uuid: string): Promise<Store> {
 
   
 
-  //  throw new Error('Not implemented')
+
   
 }
   

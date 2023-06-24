@@ -5,7 +5,7 @@ import { SearchableMessage } from "./database/types"
 
 
 async function main() {
-// 
+    // 
 }
 
 main()
