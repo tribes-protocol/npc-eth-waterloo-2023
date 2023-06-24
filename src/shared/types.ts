@@ -7,8 +7,40 @@ export interface Message {
   channelId: ChannelId
 }
 
+export function asMessage(obj: any): Message {
+  if (isNull(obj)) throw new Error('Message is null')
+
+  return {
+    id: obj['id'],
+    author: new EthWalletAddress(obj['author']),
+    content: obj['content'],
+    timestamp: obj['timestamp'],
+    channelId: new ChannelId(obj['channelId'])
+  }
+}
+
+export function proofToMessage(json: any): Message | undefined {
+  try {
+    const data = JSON.parse(json.data)
+    if (data.action === 1 && data.type === 'message' && !isNull(data.model?.body)) {
+      return {
+        id: json.id,
+        content: data.model.body,
+        channelId: new ChannelId(json.channelId),
+        author: new EthWalletAddress(json.author),
+        timestamp: json.serverTimestamp,
+      }
+    }
+  } catch (e: any) {
+    console.log(`Error parsing message: ${e.message}`, e)
+    return undefined
+  }
+}
+
+
 import { ethers } from 'ethers'
 import { Secp256k1PublicKey } from '../cryptography/secp256k1'
+import { isNull } from './functions'
 
 export function prepend0x(hex: string) {
   return hex.replace(/^(0x)?/i, '0x')

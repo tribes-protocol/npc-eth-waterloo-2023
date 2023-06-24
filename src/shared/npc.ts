@@ -17,7 +17,7 @@ import { kTribesWSAPI } from './constants'
 import { Disk } from './disk'
 import { asNumber, asString, isNull } from './functions'
 import { Memory } from "./memory"
-import { ChannelId, EthChain, EthNFTAddress, EthWalletAddress, Message } from './types'
+import { ChannelId, EthChain, EthNFTAddress, EthWalletAddress, Message, proofToMessage } from './types'
 
 const ec = new EC('secp256k1')
 
@@ -155,32 +155,7 @@ export class NPC {
     const signature = await wallet.signMessage(msgToSign.message)
     const deviceSignature = Secp256k1.signMessage(msgToSign.message, device)
     const jwt = await AccountAPI.login(msgToSign.message, signature, deviceSignature)
-
     const websocket = new WebSocketConnection(kTribesWSAPI)
-
-    function parseUserMessage(msg: string): Message | undefined {
-      try {
-        const json = JSON.parse(msg)
-        if (json.type !== 'new_proof') {
-          return undefined
-        }
-
-        const data = JSON.parse(json.body.data)
-        if (data.action === 1 && data.type === 'message' && !isNull(data.model?.body)) {
-          return {
-            id: json.body.id,
-            content: data.model.body,
-            channelId: new ChannelId(json.body.channelId),
-            author: new EthWalletAddress(json.body.author),
-            timestamp: json.body.serverTimestamp,
-          }
-        }
-      } catch (e: any) {
-        console.log(`Error parsing message: ${e.message}`, e)
-        return undefined
-      }
-    }
-
     const memory = await Memory.create(account.value)
     const npc = new NPC({
       nft: {
@@ -200,10 +175,16 @@ export class NPC {
 
     websocket.on('message', async (msg) => {
       try {
-        const parsedMessage = parseUserMessage(msg)
+        const json = JSON.parse(msg)
+        if (json.type !== 'new_proof') {
+          return undefined
+        }
+
+        const parsedMessage = proofToMessage(json.body)
         if (isNull(parsedMessage) || parsedMessage.author.value === account.value) {
           return
         }
+
         await this.handleMessage(parsedMessage, npc)
       } catch (e: any) {
         console.log(`Error handling message: ${e.message}`, e)
@@ -214,6 +195,11 @@ export class NPC {
 
     console.log(`NPC ${account.value} logged in!`)
 
+
+    await npc.memory.sync(new ChannelId("direct:0x1ab7a986e32e46d40b469cfa38e11eb2fd9fcdbe_0xe69f609c75f8640fa034166c63929f2875c01343/message"))
+    const channelId = new ChannelId("direct:0x1ab7a986e32e46d40b469cfa38e11eb2fd9fcdbe_0xe69f609c75f8640fa034166c63929f2875c01343/message")
+    const recents = await npc.memory.getRecentMessages(channelId, 100, 'ASC')
+
     return npc
   }
 
@@ -223,36 +209,18 @@ export class NPC {
       return
     }
 
-    await npc.memory.put(msg)
-    npc.memory.sync(msg.channelId)
 
-
-    const system: ChatCompletionRequestMessage = {
-      role: 'system',
-      content: npc.systemPrompt
-    }
-
-    const completion = await npc.openai.createChatCompletion({
-      model: 'gpt-3.5-turbo-0613',
-      messages: [
-        system,
-        // ...messages.toArray()
-      ],
-      temperature: 0.9,
-      //    functions: isDM ? NPC.dmFunctions : NPC.groupFunctions,
-      //    function_call: 'auto'
-    })
-
-    const response = completion.data.choices[0].message
-    const content = response?.content?.trim()
-    // const functionCall = response?.function_call
+    const response = await npc.llm(msg)
 
     console.info('Human:', msg.id, msg.content)
     console.info('AI: ', response)
 
-    if (!isNull(content) && content.trim().length > 0) {
-      await ProofAPI.sendMessage(npc, content, msg.channelId, undefined)
+    if (!isNull(response) && response.trim().length > 0) {
+      await ProofAPI.sendMessage(npc, response, msg.channelId, undefined)
     }
+
+    await npc.memory.put(msg)
+    npc.memory.sync(msg.channelId)
   }
 
   private static async getERC721Metadata(
@@ -288,17 +256,27 @@ export class NPC {
     return metadata
   }
 
-  async llm(message: string): Promise<string> {
+  async llm(message: Message): Promise<string | undefined> {
+    const recents = [
+      ...(await this.memory.getRecentMessages(message.channelId, 33, 'ASC')),
+      message
+    ]
+    const messages: ChatCompletionRequestMessage[] = recents.map((r) => {
+      return {
+        role: r.author.value === this.account.value ? 'assistant' : 'user',
+        content: r.content,
+      }
+    })
     const completion = await this.openai.createChatCompletion({
       model: 'gpt-3.5-turbo-0613',
       messages: [
         { 'role': 'system', 'content': this.systemPrompt },
-        // ...messages.toArray()
+        ...messages
       ],
       temperature: 0,
     })
     const response = completion.data.choices[0].message
     const content = response?.content?.trim()
-    return content ?? ''
+    return content
   }
 }

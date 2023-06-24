@@ -2,9 +2,9 @@ import axios, { AxiosResponse } from 'axios'
 import { ec as EC } from 'elliptic'
 import { Secp256k1, Secp256k1PublicKey } from '../cryptography/secp256k1'
 import { kTribesHTTPAPI } from '../shared/constants'
-import { compactMap, isNull } from '../shared/functions'
+import { compactMap } from '../shared/functions'
 import { NPC } from '../shared/npc'
-import { ChannelId, Message, ProofRequest } from '../shared/types'
+import { ChannelId, Message, ProofRequest, proofToMessage } from '../shared/types'
 import { JWT } from './account_api'
 import { getOwnershipId } from './ownership'
 
@@ -41,23 +41,6 @@ async function getProofs(
   return response.data
 }
 
-function parseUserMessage(json: any): Message | undefined {
-  try {
-    const data = JSON.parse(json.data)
-    if (data.action === 1 && data.type === 'message' && !isNull(data.model?.body)) {
-      return {
-        id: json.id,
-        content: data.model.body,
-        channelId: json.channelId,
-        author: json.author,
-        timestamp: json.serverTimestamp,
-      }
-    }
-  } catch (e: any) {
-    console.log(`Error parsing message: ${e.message}`, e)
-    return undefined
-  }
-}
 
 async function getMessages(
   channelId: ChannelId,
@@ -66,7 +49,7 @@ async function getMessages(
 ): Promise<{ messages: Message[], cursor?: string }> {
   const result = await getProofs(channelId, limit, cursor)
   return {
-    messages: result.proofs.map(parseUserMessage),
+    messages: result.proofs.map(proofToMessage),
     cursor: result.cursor
   }
 }
