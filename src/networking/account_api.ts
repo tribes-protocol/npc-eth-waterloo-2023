@@ -40,6 +40,8 @@ async function getMessageToSignBy6551(
   }
 }
 
+let jwtToken: string | undefined
+
 async function login(
   message: string,
   signature: string,
@@ -63,10 +65,16 @@ async function login(
     throw new Error('login failed')
   }
 
+  jwtToken = response.data
+
   return response.data
 }
 
 export const AccountAPI = {
   getMessageToSignBy6551,
   login
+}
+
+export const JWT = {
+  value: () => jwtToken
 }
