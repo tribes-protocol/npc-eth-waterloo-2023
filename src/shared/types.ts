@@ -5,6 +5,7 @@ export interface Message {
   content: string
   timestamp: number // epoch
   channelId: ChannelId
+  sequence: number
 }
 
 export function asMessage(obj: any): Message {
@@ -15,7 +16,8 @@ export function asMessage(obj: any): Message {
     author: new EthWalletAddress(obj['author']),
     content: obj['content'],
     timestamp: obj['timestamp'],
-    channelId: new ChannelId(obj['channelId'])
+    channelId: new ChannelId(obj['channelId']),
+    sequence: asNumber(obj['sequence'])
   }
 }
 
@@ -29,6 +31,7 @@ export function proofToMessage(json: any): Message | undefined {
         channelId: new ChannelId(json.channelId),
         author: new EthWalletAddress(json.author),
         timestamp: json.serverTimestamp,
+        sequence: asNumber(json.sequence)
       }
     }
   } catch (e: any) {
@@ -40,7 +43,7 @@ export function proofToMessage(json: any): Message | undefined {
 
 import { ethers } from 'ethers'
 import { Secp256k1PublicKey } from '../cryptography/secp256k1'
-import { isNull } from './functions'
+import { asNumber, isNull } from './functions'
 
 export function prepend0x(hex: string) {
   return hex.replace(/^(0x)?/i, '0x')

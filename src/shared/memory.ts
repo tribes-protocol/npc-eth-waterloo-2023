@@ -40,19 +40,44 @@ export class Memory {
       author VARCAR(255) NOT NULL,
       content TEXT NOT NULL,
       timestamp INTEGER NOT NULL,
-      channelId TEXT NOT NULL
+      channelId TEXT NOT NULL,
+      sequence INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS message_positions (
+      channelId TEXT NOT NULL PRIMARY KEY,
+      position INTEGER NOT NULL
     );
 
     CREATE INDEX IF NOT EXISTS idx_message_channelId_timestamp ON message(channelId, timestamp);
   `
+
     await new Promise<void>((resolve, reject) => {
-      this.db.run(createTableQuery, (error) => {
+      this.db.exec(createTableQuery, (error) => {
         if (error) {
           console.error('Error creating table:', error)
           reject(error)
         } else {
-          console.log(`Table message created successfully.`)
+          console.log(`Tables created successfully.`)
           resolve()
+        }
+      })
+    })
+  }
+
+  private async getMessagePosition(channelId: ChannelId): Promise<number> {
+    return new Promise<number>((resolve, reject) => {
+      const getPositionQuery = "SELECT position FROM message_positions WHERE channelId = ?"
+
+      this.db.get(getPositionQuery, [channelId.raw], (error, row) => {
+        if (error) {
+          console.error(`Error retrieving position for channel ${channelId.raw}: ${error.message} `)
+          reject(error)
+        } else {
+          if (row) {
+            resolve((row as any).position)
+          } else {
+            resolve(-1)
+          }
         }
       })
     })
@@ -63,6 +88,7 @@ export class Memory {
       const batchSize = 50
       let messages: Message[] = []
       let cursor: string | undefined
+      let highestSequenceNumber: number = await this.getMessagePosition(channelId)
 
       do {
         const result = await ProofAPI.getMessages(channelId, batchSize, cursor)
@@ -70,19 +96,28 @@ export class Memory {
         messages = result.messages
 
         for (const message of messages) {
-          await this.put(message)
+          if (message.sequence < highestSequenceNumber) {
+            cursor = undefined
+            break
+          }
+          await this.put(message) // Store the message in the database
+          highestSequenceNumber = Math.max(highestSequenceNumber, message.sequence)
         }
       } while (cursor)
+
+      // put highest message into table
+      await this.putPosition(channelId, highestSequenceNumber)
+
     } catch (e: any) {
-      console.error(`Error syncing channel ${channelId.raw}: ${e.message}`, e)
+      console.error(`Error syncing channel ${channelId.raw}: ${e.message} `, e)
     }
   }
 
   async search(channelId: ChannelId, query: string, limit: number): Promise<Message[]> {
     return new Promise((resolve, reject) => {
       const searchQuery = `
-        SELECT * FROM message WHERE  channelId = ? AND content LIKE ? LIMIT ?
-      `
+      SELECT * FROM message WHERE channelId = ? AND content LIKE ? LIMIT ?
+        `
 
       const searchParam = `%${query}%`
       this.db.all(
@@ -99,19 +134,45 @@ export class Memory {
     })
   }
 
-  async put(data: Message): Promise<void> {
+  async putPosition(channelId: ChannelId, sequence: number): Promise<void> {
     return new Promise((resolve, reject) => {
       const insertQuery = `
-          INSERT OR IGNORE INTO message (id, author, content, timestamp, channelId)
-          VALUES (?, ?, ?, ?, ?)
+      INSERT or REPLACE INTO message_positions (channelId, position)
+      SELECT ?, ?
+      WHERE NOT EXISTS (
+        SELECT 1 FROM message_positions WHERE channelId = ? AND position >= ?
+      )
+      OR (
+        SELECT position FROM message_positions WHERE channelId = ?
+      ) < ?
         `
 
-      const { id, author, content, timestamp, channelId } = data
-      const values = [id, author.value, content, timestamp, channelId.raw]
+      const values = [channelId.raw, sequence, channelId.raw, sequence, channelId.raw, sequence]
 
       this.db.run(insertQuery, values, function (error) {
         if (error) {
-          console.error('Unable to instert', error)
+          console.error('Unable to insert', error)
+          reject(error)
+        } else {
+          resolve()
+        }
+      })
+    })
+  }
+
+  async put(data: Message): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const insertQuery = `
+          INSERT OR IGNORE INTO message(id, author, content, timestamp, channelId, sequence)
+      VALUES(?, ?, ?, ?, ?, ?)
+      `
+
+      const { id, author, content, timestamp, channelId } = data
+      const values = [id, author.value, content, timestamp, channelId.raw, data.sequence]
+
+      this.db.run(insertQuery, values, function (error) {
+        if (error) {
+          console.error('Unable to insert', error)
           reject(error)
         } else {
           resolve()
@@ -123,11 +184,12 @@ export class Memory {
   async getRecentMessages(channelId: ChannelId, limit: number, order: 'DESC' | 'ASC'): Promise<Message[]> {
     return new Promise((resolve, reject) => {
       const selectQuery = `
-        SELECT * FROM message
+      SELECT * 
+         FROM message
         WHERE channelId = ?
         ORDER BY timestamp ${order}
-        LIMIT ?
-      `
+      LIMIT ?
+        `
 
       this.db.all(selectQuery, [channelId.raw, limit], (error, rows) => {
         if (error) {
