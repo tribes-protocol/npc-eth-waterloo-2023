@@ -1,9 +1,10 @@
 
-export interface SearchableMessage {
+export interface Message {
   id: string
   author: string
   content: string
   timestamp: number // epoch
+  channelId: string
 }
 
 import { ethers } from 'ethers'

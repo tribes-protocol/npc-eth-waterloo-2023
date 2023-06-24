@@ -2,17 +2,17 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import sqlite3 from 'sqlite3'
-import { SearchableMessage } from '../shared/types'
+import { Message } from '../shared/types'
 
 export class Store {
   private readonly db: sqlite3.Database
 
 
-static async create(uuid: string): Promise<Store> {
-  const instance = new Store(uuid)
-  await instance.setupDB()
-  return instance;
-}
+  static async create(uuid: string): Promise<Store> {
+    const instance = new Store(uuid)
+    await instance.setupDB()
+    return instance;
+  }
 
   private constructor(uuid: string) {
     const dirPath = path.join(os.homedir(), '.npc')
@@ -36,20 +36,16 @@ static async create(uuid: string): Promise<Store> {
     // implement this
 
 
-
-  
-
-
   } //end of class
 
   private async setupDB(): Promise<void> {
     const createTableQuery = `
     CREATE TABLE IF NOT EXISTS message (
-   
-      id INTEGER PRIMARY KEY,
+      id VARCAR(255) PRIMARY KEY,
       author VARCAR(255),
       content TEXT,
-      timestamp INTEGER
+      timestamp INTEGER,
+      channelId TEXT
     );
   `;
 
@@ -70,58 +66,59 @@ static async create(uuid: string): Promise<Store> {
 
 
 
-  public async search(query: string, limit: number): Promise<SearchableMessage[]> {
+  public async search(query: string, limit: number): Promise<Message[]> {
     return new Promise((resolve, reject) => {
       const searchQuery = `
         SELECT * FROM message WHERE content LIKE ? LIMIT ?
       `;
-  
+
       const searchParam = `%${query}%`;
       this.db.all(searchQuery, [searchParam, limit], (error, rows: { [key: string]: any }[]) => {
         if (error) {
           reject(error);
         } else {
-          const messages: SearchableMessage[] = rows.map(row => ({
+          const messages: Message[] = rows.map(row => ({
             id: row['id'],
             author: row['author'],
             content: row['content'],
-            timestamp: row['timestamp']
+            timestamp: row['timestamp'],
+            channelId: row['channelId']
           }));
           resolve(messages);
         }
       });
     });
-  }  
-   
-  
-    public async put(data: SearchableMessage): Promise<void> {
-      return new Promise((resolve, reject) => {
-        const insertQuery = `
-          INSERT OR IGNORE INTO message (id, author, content, timestamp)
-          VALUES (?, ?, ?, ?)
+  }
+
+
+  public async put(data: Message): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const insertQuery = `
+          INSERT OR IGNORE INTO message (id, author, content, timestamp, channelId)
+          VALUES (?, ?, ?, ?, ?)
         `;
-    
-        const { id, author, content, timestamp } = data;
-        const values = [id, author, content, timestamp];
-    
-        this.db.run(insertQuery, values, function(error) {
-          if (error) {
-            console.error('Unable to instert', error);
-            reject(error);
-          } else {
-            resolve();
-          }
-        });
+
+      const { id, author, content, timestamp, channelId } = data;
+      const values = [id, author, content, timestamp, channelId];
+
+      this.db.run(insertQuery, values, function (error) {
+        if (error) {
+          console.error('Unable to insert', error);
+          reject(error);
+        } else {
+          resolve();
+        }
       });
-    }
-    
-
-  
+    });
+  }
 
 
-  
+
+
+
+
 }
-  
+
 
 /*
 
