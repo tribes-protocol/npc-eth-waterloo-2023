@@ -3,33 +3,35 @@ import 'cross-fetch/polyfill'
 import dotenv from 'dotenv'
 import { ec as EC } from 'elliptic'
 import { ethers } from 'ethers'
-import { Configuration, OpenAIApi } from 'openai'
+import { ChatCompletionRequestMessage, Configuration, OpenAIApi } from 'openai'
 import path from 'path'
 import { Secp256k1, Secp256k1PublicKey } from '../cryptography/secp256k1'
 import { EIP6551 } from '../ethereum/eip6551'
 import { ERC721 } from '../ethereum/erc721'
 import { Eth } from '../ethereum/eth'
 import { AccountAPI } from '../networking/account_api'
+import { ProofAPI } from "../networking/proof_api"
 import { WebSocketConnection } from '../networking/websocket'
 import { npcSystemPrompt, personalityProfileFromERC721Metadata } from "../prompts/personality"
 import { kTribesWSAPI } from './constants'
 import { Disk } from './disk'
 import { asNumber, asString, isNull } from './functions'
-import { EthChain, EthNFTAddress, EthWalletAddress } from './types'
+import { Memory } from "./memory"
+import { ChannelId, EthChain, EthNFTAddress, EthWalletAddress, Message } from './types'
+
 const ec = new EC('secp256k1')
-
-
-// how to extract the api key and make sure you can reference it from npc class
-
 
 export class NPC {
   private readonly openai: OpenAIApi
   private readonly systemPrompt: string
+  private readonly alchemyAPIKey: string
+  private readonly memory: Memory
 
   readonly nft: EthNFTAddress
   readonly owner: EthWalletAddress
   readonly wallet: ethers.HDNodeWallet
-  readonly alchemyAPIKey: string
+  readonly account: EthWalletAddress
+  readonly device: EC.KeyPair
 
   private constructor(
     params: {
@@ -38,7 +40,10 @@ export class NPC {
       owner: EthWalletAddress,
       wallet: ethers.HDNodeWallet,
       alchemyAPIKey: string,
-      systemPrompt: string
+      systemPrompt: string,
+      account: EthWalletAddress,
+      device: EC.KeyPair,
+      memory: Memory,
     }
   ) {
     this.nft = params.nft
@@ -47,6 +52,9 @@ export class NPC {
     this.alchemyAPIKey = params.alchemyAPIKey
     this.openai = params.openai
     this.systemPrompt = params.systemPrompt
+    this.account = params.account
+    this.device = params.device
+    this.memory = params.memory
   }
 
   static async login(opts: { envPath?: string } = {}) {
@@ -110,9 +118,9 @@ export class NPC {
       const prompt = personalityProfileFromERC721Metadata(metadata.rawMetadata)
       try {
         const completion = await openai.createChatCompletion({
-          model: 'gpt-3.5-turbo-0613',
+          model: 'gpt-3.5-turbo-16k',
           messages: [
-            { role: 'system', content: 'create a fake funny personality profile' }
+            { role: 'system', content: prompt }
           ],
           temperature: 0.9
         })
@@ -149,19 +157,32 @@ export class NPC {
     const jwt = await AccountAPI.login(msgToSign.message, signature, deviceSignature)
 
     const websocket = new WebSocketConnection(kTribesWSAPI)
-    // websocket.on('message', async (msg) => {
-    //   try {
-    //     await handleMessage(msg)
-    //   } catch (e: any) {
-    //     console.log(`Error handling message: ${e.message}`, e)
-    //   }
-    // })
 
-    websocket.connect(jwt)
+    function parseUserMessage(msg: string): Message | undefined {
+      try {
+        const json = JSON.parse(msg)
+        if (json.type !== 'new_proof') {
+          return undefined
+        }
 
-    console.log('NPC logged in!')
+        const data = JSON.parse(json.body.data)
+        if (data.action === 1 && data.type === 'message' && !isNull(data.model?.body)) {
+          return {
+            id: json.body.id,
+            content: data.model.body,
+            channelId: new ChannelId(json.body.channelId),
+            author: new EthWalletAddress(json.body.author),
+            timestamp: json.body.serverTimestamp,
+          }
+        }
+      } catch (e: any) {
+        console.log(`Error parsing message: ${e.message}`, e)
+        return undefined
+      }
+    }
 
-    return new NPC({
+    const memory = await Memory.create(account.value)
+    const npc = new NPC({
       nft: {
         chainId: nftChainId,
         contractAddress: nftContract,
@@ -172,7 +193,66 @@ export class NPC {
       wallet,
       alchemyAPIKey: asString(process.env.ALCHEMY_POLYGON_API_KEY),
       systemPrompt: npcSystemPrompt(personalityJson.content),
+      account,
+      device,
+      memory,
     })
+
+    websocket.on('message', async (msg) => {
+      try {
+        const parsedMessage = parseUserMessage(msg)
+        if (isNull(parsedMessage) || parsedMessage.author.value === account.value) {
+          return
+        }
+        await this.handleMessage(parsedMessage, npc)
+      } catch (e: any) {
+        console.log(`Error handling message: ${e.message}`, e)
+      }
+    })
+
+    websocket.connect(jwt)
+
+    console.log(`NPC ${account.value} logged in!`)
+
+    return npc
+  }
+
+  private static async handleMessage(msg: Message, npc: NPC): Promise<void> {
+    const isDM = msg.channelId.root.startsWith('direct:')
+    if (!isDM) {
+      return
+    }
+
+    await npc.memory.put(msg)
+    npc.memory.sync(msg.channelId)
+
+
+    const system: ChatCompletionRequestMessage = {
+      role: 'system',
+      content: npc.systemPrompt
+    }
+
+    const completion = await npc.openai.createChatCompletion({
+      model: 'gpt-3.5-turbo-0613',
+      messages: [
+        system,
+        // ...messages.toArray()
+      ],
+      temperature: 0.9,
+      //    functions: isDM ? NPC.dmFunctions : NPC.groupFunctions,
+      //    function_call: 'auto'
+    })
+
+    const response = completion.data.choices[0].message
+    const content = response?.content?.trim()
+    // const functionCall = response?.function_call
+
+    console.info('Human:', msg.id, msg.content)
+    console.info('AI: ', response)
+
+    if (!isNull(content) && content.trim().length > 0) {
+      await ProofAPI.sendMessage(npc, content, msg.channelId, undefined)
+    }
   }
 
   private static async getERC721Metadata(

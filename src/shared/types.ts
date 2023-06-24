@@ -1,13 +1,14 @@
 
 export interface Message {
   id: string
-  author: string
+  author: EthWalletAddress
   content: string
   timestamp: number // epoch
-  channelId: string
+  channelId: ChannelId
 }
 
 import { ethers } from 'ethers'
+import { Secp256k1PublicKey } from '../cryptography/secp256k1'
 
 export function prepend0x(hex: string) {
   return hex.replace(/^(0x)?/i, '0x')
@@ -56,4 +57,41 @@ export interface MessageToSignResponseEIP6551 {
   owner: EthWalletAddress
   type: 'eip6551'
   message: string
+}
+
+export class ChannelId {
+  readonly raw: string
+  readonly root: string
+
+  constructor(raw: string) {
+    this.raw = raw
+    this.root = raw.split('/')[0]
+  }
+
+  static direct(user1: EthWalletAddress, user2: EthWalletAddress): ChannelId {
+    const raw = `direct:${[user1.value, user2.value].sort().join('_')}`
+    return new ChannelId(raw)
+  }
+
+  toMessageChannelId(): ChannelId {
+    return new ChannelId([this.root, 'message'].join('/'))
+  }
+
+  toReactionChannelId(messageId: string): ChannelId {
+    return new ChannelId([this.root, messageId, 'reaction'].join('/'))
+  }
+
+  toTipChannelId(messageId: string): ChannelId {
+    return new ChannelId([this.root, messageId, 'tip'].join('/'))
+  }
+}
+
+export interface ProofRequest {
+  author: EthWalletAddress
+  channelId: string
+  data: string
+  device: Secp256k1PublicKey
+  signature: string
+  clientTimestamp: number
+  ownershipId: string
 }
