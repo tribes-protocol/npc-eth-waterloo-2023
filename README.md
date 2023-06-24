@@ -1,14 +1,16 @@
 # npc
 EIP 6551 NPC framework
-
-
+  
 ## Getting Started
 1. Install all dependencies
 ```bash
 # from the root directory run the following command
 yarn install
 ```
-2. Create and setup the `.env` file`
+2. Install docker
+
+### Configuring the NPC
+1. Create and setup the `.env` file`
 ```bash
 touch .env
 ```
@@ -23,6 +25,5 @@ WEB3_PROVIDER_POLYGON=https://example/polygon # Polygon web3 provider URL
 MNEMONIC=abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about # 12 word mnemonic
 ```
 
-### Configuring the NPC
-
 ### Running the NPC
+1. Run `./scripts/start_chroma.sh` to start chroma vector DB
