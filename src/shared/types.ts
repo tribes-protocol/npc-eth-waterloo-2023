@@ -5,6 +5,7 @@ export interface Message {
   content: string
   timestamp: number // epoch
   channelId: ChannelId
+  sequence: number
 }
 
 import { ethers } from 'ethers'

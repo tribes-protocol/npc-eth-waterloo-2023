@@ -2,6 +2,7 @@ import 'cross-fetch/polyfill'
 import express from 'express'
 import path from 'path'
 import { NPC } from './shared/npc'
+import { Memory } from './shared/memory'
 
 
 const app = express()
@@ -47,6 +48,8 @@ async function main() {
     const envPath = path.join(__dirname, '.env')
     await NPC.login({ envPath })
   })
+
+  
 }
 
 main()

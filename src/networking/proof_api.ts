@@ -51,6 +51,7 @@ function parseUserMessage(json: any): Message | undefined {
         channelId: json.channelId,
         author: json.author,
         timestamp: json.serverTimestamp,
+        sequence: json.sequence
       }
     }
   } catch (e: any) {

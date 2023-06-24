@@ -173,6 +173,7 @@ export class NPC {
             channelId: new ChannelId(json.body.channelId),
             author: new EthWalletAddress(json.body.author),
             timestamp: json.body.serverTimestamp,
+            sequence: json.body.sequence,
           }
         }
       } catch (e: any) {
