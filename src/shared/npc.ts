@@ -3,7 +3,7 @@ import 'cross-fetch/polyfill'
 import dotenv from 'dotenv'
 import { ec as EC } from 'elliptic'
 import { ethers } from 'ethers'
-import { ChatCompletionRequestMessage, Configuration, OpenAIApi } from 'openai'
+import { ChatCompletionFunctions, ChatCompletionRequestMessage, Configuration, OpenAIApi } from 'openai'
 import path from 'path'
 import { Secp256k1, Secp256k1PublicKey } from '../cryptography/secp256k1'
 import { EIP6551 } from '../ethereum/eip6551'
@@ -15,9 +15,9 @@ import { WebSocketConnection } from '../networking/websocket'
 import { npcSystemPrompt, personalityProfileFromERC721Metadata } from "../prompts/personality"
 import { kTribesWSAPI } from './constants'
 import { Disk } from './disk'
-import { asNumber, asString, isNull } from './functions'
+import { asNumber, asString, isNull, toJsonTree } from './functions'
 import { Memory } from "./memory"
-import { ChannelId, EthChain, EthNFTAddress, EthWalletAddress, Message } from './types'
+import { EthChain, EthNFTAddress, EthWalletAddress, Message, proofToMessage } from './types'
 
 const ec = new EC('secp256k1')
 
@@ -155,33 +155,7 @@ export class NPC {
     const signature = await wallet.signMessage(msgToSign.message)
     const deviceSignature = Secp256k1.signMessage(msgToSign.message, device)
     const jwt = await AccountAPI.login(msgToSign.message, signature, deviceSignature)
-
     const websocket = new WebSocketConnection(kTribesWSAPI)
-
-    function parseUserMessage(msg: string): Message | undefined {
-      try {
-        const json = JSON.parse(msg)
-        if (json.type !== 'new_proof') {
-          return undefined
-        }
-
-        const data = JSON.parse(json.body.data)
-        if (data.action === 1 && data.type === 'message' && !isNull(data.model?.body)) {
-          return {
-            id: json.body.id,
-            content: data.model.body,
-            channelId: new ChannelId(json.body.channelId),
-            author: new EthWalletAddress(json.body.author),
-            timestamp: json.body.serverTimestamp,
-            sequence: json.body.sequence,
-          }
-        }
-      } catch (e: any) {
-        console.log(`Error parsing message: ${e.message}`, e)
-        return undefined
-      }
-    }
-
     const memory = await Memory.create(account.value)
     const npc = new NPC({
       nft: {
@@ -201,10 +175,16 @@ export class NPC {
 
     websocket.on('message', async (msg) => {
       try {
-        const parsedMessage = parseUserMessage(msg)
+        const json = JSON.parse(msg)
+        if (json.type !== 'new_proof') {
+          return undefined
+        }
+
+        const parsedMessage = proofToMessage(json.body)
         if (isNull(parsedMessage) || parsedMessage.author.value === account.value) {
           return
         }
+
         await this.handleMessage(parsedMessage, npc)
       } catch (e: any) {
         console.log(`Error handling message: ${e.message}`, e)
@@ -214,7 +194,6 @@ export class NPC {
     websocket.connect(jwt)
 
     console.log(`NPC ${account.value} logged in!`)
-
     return npc
   }
 
@@ -224,36 +203,18 @@ export class NPC {
       return
     }
 
-    await npc.memory.put(msg)
-    npc.memory.sync(msg.channelId)
 
-
-    const system: ChatCompletionRequestMessage = {
-      role: 'system',
-      content: npc.systemPrompt
-    }
-
-    const completion = await npc.openai.createChatCompletion({
-      model: 'gpt-3.5-turbo-0613',
-      messages: [
-        system,
-        // ...messages.toArray()
-      ],
-      temperature: 0.9,
-      //    functions: isDM ? NPC.dmFunctions : NPC.groupFunctions,
-      //    function_call: 'auto'
-    })
-
-    const response = completion.data.choices[0].message
-    const content = response?.content?.trim()
-    // const functionCall = response?.function_call
+    const response = await npc.llm(msg)
 
     console.info('Human:', msg.id, msg.content)
     console.info('AI: ', response)
 
-    if (!isNull(content) && content.trim().length > 0) {
-      await ProofAPI.sendMessage(npc, content, msg.channelId, undefined)
+    if (!isNull(response) && response.trim().length > 0) {
+      await ProofAPI.sendMessage(npc, response, msg.channelId, undefined)
     }
+
+    await npc.memory.put(msg)
+    npc.memory.sync(msg.channelId)
   }
 
   private static async getERC721Metadata(
@@ -289,17 +250,80 @@ export class NPC {
     return metadata
   }
 
-  async llm(message: string): Promise<string> {
-    const completion = await this.openai.createChatCompletion({
-      model: 'gpt-3.5-turbo-0613',
-      messages: [
-        { 'role': 'system', 'content': this.systemPrompt },
-        // ...messages.toArray()
-      ],
-      temperature: 0,
+  async llm(message: Message): Promise<string | undefined> {
+    const recents = [
+      ...(await this.memory.getRecentMessages(message.channelId, 5, 'DESC')),
+      message
+    ]
+    const messages: ChatCompletionRequestMessage[] = recents.map((r) => {
+      return {
+        role: r.author.value === this.account.value ? 'assistant' : 'user',
+        content: r.content,
+      }
     })
-    const response = completion.data.choices[0].message
-    const content = response?.content?.trim()
-    return content ?? ''
+
+    const functions: ChatCompletionFunctions[] = [
+      {
+        name: 'search_messages',
+        description: 'Use this to search all chat history or if you want to lookup something that happened in the past',
+        parameters: {
+          type: 'object',
+          properties: {
+            query: {
+              type: 'string',
+              description: 'A string query to use for searching'
+            }
+          },
+          required: ['query']
+        }
+      },
+    ]
+
+    let limit = 0
+    do {
+      const completion = await this.openai.createChatCompletion({
+        model: 'gpt-3.5-turbo-0613',
+        messages: [
+          { 'role': 'system', 'content': this.systemPrompt },
+          ...messages
+        ],
+        temperature: 0,
+        functions,
+        function_call: 'auto'
+      })
+
+      const response = completion.data.choices[0].message
+      const functionCall = response?.function_call
+
+      if (
+        response?.role === 'assistant' &&
+        !isNull(functionCall) &&
+        functionCall.name === 'search_messages'
+      ) {
+        messages.push(response)
+
+        const params = JSON.parse(functionCall.arguments ?? '{}')
+        const query = params.query
+        if (isNull(query) || query.trim().length === 0) {
+          break
+        }
+        const searchResults = this.memory.search(message.channelId, query, 5)
+
+        messages.push({
+          role: 'function',
+          name: functionCall.name,
+          content: JSON.stringify({
+            results: (await searchResults).map(toJsonTree)
+          })
+        })
+      } else {
+        const content = response?.content?.trim()
+        return content
+      }
+
+      limit++
+    } while (limit < 10)
+
+    return undefined
   }
 }

@@ -3,7 +3,7 @@ import os from 'os'
 import path from 'path'
 import sqlite3 from 'sqlite3'
 import { ProofAPI } from '../networking/proof_api'
-import { ChannelId, Message } from './types'
+import { ChannelId, Message, asMessage } from './types'
 
 export class Memory {
   private readonly db: sqlite3.Database
@@ -36,16 +36,18 @@ export class Memory {
   private async setupDB(): Promise<void> {
     const createTableQuery = `
     CREATE TABLE IF NOT EXISTS message (
-      id VARCAR(255) PRIMARY KEY,
-      author VARCAR(255),
-      content TEXT,
-      timestamp INTEGER,
-      channelId TEXT
+      id VARCAR(255) NOT NULL PRIMARY KEY,
+      author VARCAR(255) NOT NULL,
+      content TEXT NOT NULL,
+      timestamp INTEGER NOT NULL,
+      channelId TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS message_positions (
       channelId TEXT NOT NULL PRIMARY KEY,
       position INTEGER NOT NULL
     );
+
+    CREATE INDEX IF NOT EXISTS idx_message_channelId_timestamp ON message(channelId, timestamp);
   `
 
     await new Promise<void>((resolve, reject) => {
@@ -101,7 +103,7 @@ export class Memory {
           highestSequenceNumber = Math.max(highestSequenceNumber, message.sequence)
         }
       } while (cursor)
-      
+
       // put highest message into table
       await this.putPosition(channelId, highestSequenceNumber)
 
@@ -110,14 +112,14 @@ export class Memory {
     }
   }
 
-  async search(query: string, limit: number): Promise<Message[]> {
+  async search(channelId: ChannelId, query: string, limit: number): Promise<Message[]> {
     return new Promise((resolve, reject) => {
       const searchQuery = `
-      SELECT * FROM message WHERE content LIKE ? LIMIT ?
+      SELECT * FROM message WHERE channelId = ? AND content LIKE ? LIMIT ?
         `
 
       const searchParam = `%${query}%`
-      this.db.all(searchQuery, [searchParam, limit], (error, rows: { [key: string]: any }[]) => {
+      this.db.all(searchQuery, [channelId.raw, searchParam, limit], (error, rows: { [key: string]: any }[]) => {
         if (error) {
           reject(error)
         } else {
@@ -154,15 +156,16 @@ export class Memory {
     })
   }
 
+
   async put(data: Message): Promise<void> {
     return new Promise((resolve, reject) => {
       const insertQuery = `
-          INSERT OR IGNORE INTO message(id, author, content, timestamp)
-      VALUES(?, ?, ?, ?)
-        `
+          INSERT OR IGNORE INTO message(id, author, content, timestamp, channelId)
+      VALUES(?, ?, ?, ?, ?)
+      `
 
-      const { id, author, content, timestamp } = data
-      const values = [id, author, content, timestamp]
+      const { id, author, content, timestamp, channelId } = data
+      const values = [id, author.value, content, timestamp, channelId.raw]
 
       this.db.run(insertQuery, values, function (error) {
         if (error) {
@@ -174,4 +177,26 @@ export class Memory {
       })
     })
   }
+
+  async getRecentMessages(channelId: ChannelId, limit: number, order: 'DESC' | 'ASC'): Promise<Message[]> {
+    return new Promise((resolve, reject) => {
+      const selectQuery = `
+      SELECT * FROM message
+        WHERE channelId = ?
+        ORDER BY timestamp ${order}
+      LIMIT ?
+        `
+
+      this.db.all(selectQuery, [channelId.raw, limit], (error, rows) => {
+        if (error) {
+          console.error('Unable to retrieve messages', error)
+          reject(error)
+        } else {
+          const messages: Message[] = rows.map(asMessage)
+          resolve(messages)
+        }
+      })
+    })
+  }
+
 }
