@@ -7,7 +7,14 @@ import { SearchableMessage } from './types'
 export class Store {
   private readonly db: sqlite3.Database
 
-  constructor(uuid: string) {
+
+static async create(uuid: string): Promise<Store> {
+  const instance = new Store(uuid)
+  await instance.setupDB()
+  return instance;
+}
+
+  private constructor(uuid: string) {
     const dirPath = path.join(os.homedir(), '.npc')
     const dbPath = path.join(dirPath, `${uuid}.db`)
 
@@ -27,17 +34,92 @@ export class Store {
 
     // create the table if it does not exist
     // implement this
+
+
+
+  
+
+
+  } //end of class
+
+  private async setupDB(): Promise<void> {
+    const createTableQuery = `
+    CREATE TABLE IF NOT EXISTS message (
+   
+      id INTEGER PRIMARY KEY,
+      author VARCAR(255),
+      content TEXT,
+      timestamp INTEGER
+    );
+  `;
+
+    await new Promise<void>((resolve, reject) => {
+      this.db.run(createTableQuery, (error) => {
+        if (error) {
+          console.error('Error creating table:', error);
+          reject(error)
+        } else {
+          console.log(`Table message created successfully.`);
+          resolve()
+        }
+      });
+    })
   }
 
-  public async search(query: string): Promise<SearchableMessage[]> {
-    // implement search
-    throw new Error('Not implemented')
-  }
 
-  public async put(data: SearchableMessage) {
-    // implement save
-    throw new Error('Not implemented')
-  }
+
+
+
+  public async search(query: string, limit: number): Promise<SearchableMessage[]> {
+    return new Promise((resolve, reject) => {
+      const searchQuery = `
+        SELECT * FROM message WHERE content LIKE ? LIMIT ?
+      `;
+  
+      const searchParam = `%${query}%`;
+      this.db.all(searchQuery, [searchParam, limit], (error, rows: { [key: string]: any }[]) => {
+        if (error) {
+          reject(error);
+        } else {
+          const messages: SearchableMessage[] = rows.map(row => ({
+            id: row['id'],
+            author: row['author'],
+            content: row['content'],
+            timestamp: row['timestamp']
+          }));
+          resolve(messages);
+        }
+      });
+    });
+  }  
+   
+  
+    public async put(data: SearchableMessage): Promise<void> {
+      return new Promise((resolve, reject) => {
+        const insertQuery = `
+          INSERT OR IGNORE INTO message (id, author, content, timestamp)
+          VALUES (?, ?, ?, ?)
+        `;
+    
+        const { id, author, content, timestamp } = data;
+        const values = [id, author, content, timestamp];
+    
+        this.db.run(insertQuery, values, function(error) {
+          if (error) {
+            console.error('Unable to instert', error);
+            reject(error);
+          } else {
+            resolve();
+          }
+        });
+      });
+    }
+    
+
+  
+
+
+  
 }
   
 
