@@ -1,10 +1,12 @@
 import axios, { AxiosResponse } from 'axios'
+import BN from 'bn.js'
 import { ec as EC } from 'elliptic'
+import { ethers } from 'ethers'
 import { Secp256k1, Secp256k1PublicKey } from '../cryptography/secp256k1'
 import { kTribesHTTPAPI } from '../shared/constants'
-import { compactMap } from '../shared/functions'
+import { compactMap, toJsonTree } from '../shared/functions'
 import { NPC } from '../shared/npc'
-import { ChannelId, Message, ProofRequest, proofToMessage } from '../shared/types'
+import { ChannelId, EthChain, EthWalletAddress, Message, ProofRequest, proofToMessage } from '../shared/types'
 import { JWT } from './account_api'
 import { getOwnershipId } from './ownership'
 
@@ -128,6 +130,98 @@ async function addReaction(
   )
 }
 
+function generateDataForERC20Transfer({
+  erc20,
+  to,
+  amount
+}: {
+  erc20: {
+    chainId: EthChain
+    contractAddress: EthWalletAddress
+  }
+  to: EthWalletAddress
+  amount: BN
+}): string {
+  const abi = ['function transfer(address recipient, uint256 amount)']
+
+  const contract = new ethers.Contract(
+    erc20.contractAddress.value,
+    abi
+  )
+
+  const data = contract.interface.encodeFunctionData('transfer', [
+    to.value,
+    amount.toString()
+  ])
+
+  return data
+}
+
+interface ERC20AssetId {
+  chainId: EthChain
+  address: EthWalletAddress
+  type: 'erc20'
+}
+
+interface TipDTO {
+  assetId: ERC20AssetId
+  amount: string
+  to: EthWalletAddress
+  from: EthWalletAddress
+  txHash: string
+  messageId: string
+}
+
+async function sendTip(
+  npc: NPC,
+  messageId: string,
+  channelId: ChannelId,
+  to: EthWalletAddress,
+  from: EthWalletAddress,
+  message?: string
+) {
+  const assetId: ERC20AssetId = {
+    chainId: EthChain.ethereum,
+    address: new EthWalletAddress('0x8Ae452D9F8F08F21FF81c94260Cb85302a31Ac30'),
+    type: 'erc20'
+  }
+
+  const data = generateDataForERC20Transfer(
+    {
+      erc20: {
+        chainId: assetId.chainId,
+        contractAddress: assetId.address
+      },
+      to,
+      amount: new BN('1000000000000000000')
+    }
+  )
+
+  const abi = [
+    'function executeCall(address to, uint256 value, bytes data) payable returns (bytes)'
+  ]
+  const eip6551 = new ethers.Contract(npc.account.value, abi, npc.wallet)
+  const response = await eip6551.executeCall(assetId.address.value, '0', data)
+
+  const tip: TipDTO = {
+    assetId,
+    amount: '1000000000000000000',
+    to,
+    from,
+    messageId,
+    txHash: response.hash
+  }
+  await pushProof(
+    npc,
+    channelId.toTipChannelId(messageId),
+    { action: 1, type: 'tip', model: toJsonTree(tip) }
+  )
+
+  if (message) {
+    await sendMessage(npc, message, channelId, messageId)
+  }
+}
+
 async function sendMessage(
   npc: NPC,
   text: string,
@@ -152,4 +246,5 @@ export const ProofAPI = {
   getMessages,
   sendMessage,
   addReaction,
+  sendTip,
 }

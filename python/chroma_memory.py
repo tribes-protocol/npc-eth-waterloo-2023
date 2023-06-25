@@ -6,8 +6,6 @@ from typing import List
 import os
 from pathlib import Path
 from hashlib import sha256
-
-from torch import embedding
 from message import Message
 
 

@@ -8,6 +8,17 @@ export function personalityProfileFromERC721Metadata(json: any) {
   `.trim()
 }
 
+export function isThisACatJokePrompt(joke: string): string {
+  return `Is this a cat joke? If 90% confident, return {"status": "cat"} otherwise {"status": "not_cat"} \n JOKE: ${joke}`
+}
+
+export function shouldReactToMessagePrompt(message: string): string {
+  return `
+  Does the following message admires other animals besides cat? If so, return {"status": "react"} otherwise {"status": "dont_react"}
+
+  User: ${message}
+  `.trim()
+}
 
 export function npcSystemPrompt(personalityProfile: string) {
   return `

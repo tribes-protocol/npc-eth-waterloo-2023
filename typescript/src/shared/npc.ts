@@ -13,7 +13,7 @@ import { Memory } from "../memory/memory"
 import { AccountAPI } from '../networking/account_api'
 import { ProofAPI } from "../networking/proof_api"
 import { WebSocketConnection } from '../networking/websocket'
-import { npcSystemPrompt, personalityProfileFromERC721Metadata } from "../prompts/personality"
+import { isThisACatJokePrompt, npcSystemPrompt, personalityProfileFromERC721Metadata, shouldReactToMessagePrompt } from "../prompts/personality"
 import { kTribesWSAPI } from './constants'
 import { Disk } from './disk'
 import { asNumber, asString, isNull, toJsonTree } from './functions'
@@ -250,11 +250,86 @@ export class NPC {
     return metadata
   }
 
+  private async isCatJoke(joke: string): Promise<boolean> {
+    const msg = isThisACatJokePrompt(joke)
+    const completion = await this.openai.createChatCompletion({
+      model: 'gpt-3.5-turbo-0613',
+      messages: [
+        { role: 'user', content: msg }
+      ],
+      temperature: 0
+    })
+
+    const response = completion.data.choices[0].message
+    const content = response?.content?.trim()
+
+    if (isNull(content)) {
+      return false
+    }
+
+    try {
+      const result = JSON.parse(content)
+      return result.status === 'cat'
+    } catch (e) {
+      console.error('Error parsing response: ' + content, e)
+      return false
+    }
+  }
+
+  private async shouldReactPrompt(message: string): Promise<boolean> {
+    const msg = shouldReactToMessagePrompt(message)
+    const completion = await this.openai.createChatCompletion({
+      model: 'gpt-3.5-turbo-0613',
+      messages: [
+        { role: 'user', content: msg }
+      ],
+      temperature: 0
+    })
+
+    const response = completion.data.choices[0].message
+    const content = response?.content?.trim()
+
+    if (isNull(content)) {
+      return false
+    }
+
+    try {
+      const result = JSON.parse(content)
+      return result.status === 'react'
+    } catch (e) {
+      console.error('Error parsing response: ' + content, e)
+      return false
+    }
+  }
+
   async llm(message: Message): Promise<string | undefined> {
+    if (await this.isCatJoke(message.content)) {
+      await ProofAPI.sendTip(
+        this,
+        message.id,
+        message.channelId,
+        message.author,
+        this.account,
+        undefined
+      )
+      return
+    }
+
+    if (await this.shouldReactPrompt(message.content)) {
+      await ProofAPI.addReaction(
+        this,
+        '😿',
+        message.id,
+        message.channelId,
+      )
+      return
+    }
+
     const recents = [
       ...(await this.memory.getRecentMessages(message.channelId, 5, 'DESC')),
       message
     ]
+
     const messages: ChatCompletionRequestMessage[] = recents.map((r) => {
       return {
         role: r.author.value === this.account.value ? 'assistant' : 'user',
@@ -275,6 +350,20 @@ export class NPC {
             }
           },
           required: ['query']
+        }
+      },
+      {
+        name: 'send_tip',
+        description: 'Use this to send a tip to another user',
+        parameters: {
+          type: 'object',
+          properties: {
+            messageId: {
+              type: 'string',
+              description: 'Message id to send the tip'
+            },
+          },
+          required: ['messageId']
         }
       }
     ]
