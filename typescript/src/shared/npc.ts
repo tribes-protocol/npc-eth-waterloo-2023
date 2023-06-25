@@ -9,6 +9,7 @@ import { Secp256k1, Secp256k1PublicKey } from '../cryptography/secp256k1'
 import { EIP6551 } from '../ethereum/eip6551'
 import { ERC721 } from '../ethereum/erc721'
 import { Eth } from '../ethereum/eth'
+import { Memory } from "../memory/memory"
 import { AccountAPI } from '../networking/account_api'
 import { ProofAPI } from "../networking/proof_api"
 import { WebSocketConnection } from '../networking/websocket'
@@ -16,7 +17,6 @@ import { npcSystemPrompt, personalityProfileFromERC721Metadata } from "../prompt
 import { kTribesWSAPI } from './constants'
 import { Disk } from './disk'
 import { asNumber, asString, isNull, toJsonTree } from './functions'
-import { Memory } from "./memory"
 import { EthChain, EthNFTAddress, EthWalletAddress, Message, proofToMessage } from './types'
 
 const ec = new EC('secp256k1')
