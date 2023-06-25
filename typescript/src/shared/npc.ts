@@ -276,7 +276,7 @@ export class NPC {
           },
           required: ['query']
         }
-      },
+      }
     ]
 
     let limit = 0
@@ -307,13 +307,13 @@ export class NPC {
         if (isNull(query) || query.trim().length === 0) {
           break
         }
-        const searchResults = this.memory.search(message.channelId, query, 5)
+        const searchResults = await this.memory.search(message.channelId, query, 5)
 
         messages.push({
           role: 'function',
           name: functionCall.name,
           content: JSON.stringify({
-            results: (await searchResults).map(toJsonTree)
+            results: searchResults.map(toJsonTree)
           })
         })
       } else {

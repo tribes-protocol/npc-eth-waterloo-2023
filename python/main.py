@@ -1,11 +1,10 @@
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from sentence_transformers import SentenceTransformer
 from urllib.parse import urlparse, parse_qs
 import json
-import numpy as np
+from message import Message
+from chroma_memory import ChromaMemory
 
-# Load the pre-trained model
-model = SentenceTransformer("sentence-transformers/all-mpnet-base-v2")
+memory = ChromaMemory()
 
 
 class MyRequestHandler(BaseHTTPRequestHandler):
@@ -14,40 +13,59 @@ class MyRequestHandler(BaseHTTPRequestHandler):
         parsed_url = urlparse(self.path)
         query_params = parse_qs(parsed_url.query)
 
-        if "sentence" in query_params:
-            sentence = query_params["sentence"][0]
-            embeddings = model.encode([sentence])
+        if parsed_url.path == "/query":
+            if "q" in query_params:
+                query = query_params["q"][0]
+                channel_id = query_params["channelId"][0]
+                limit = int(query_params["limit"][0])
+                results = memory.search(channel_id, query, limit)
+                response_data = {"messages": [vars(result) for result in results]}
+                json_response = json.dumps(response_data)
 
-            self.send_response(200)
-
-            # Set response headers
-            self.send_header("Content-type", "application/json")
-            self.end_headers()
-
-            # Convert the embeddings list of tensors to a NumPy array
-            embeddings_np = np.array(embeddings)
-
-            # Convert the NumPy array to a Python list
-            embeddings_list = embeddings_np.tolist()
-
-            # Create a response dictionary
-            response_data = {"message": embeddings_list}
-
-            # Convert the response dictionary to JSON
-            json_response = json.dumps(response_data)
-
-            # Send the JSON response
-            self.wfile.write(json_response.encode())
+                self.send_response(200)
+                self.send_header("Content-type", "application/json")
+                self.end_headers()
+                self.wfile.write(json_response.encode())
+            else:
+                self.send_response(400)
+                self.send_header("Content-type", "text/html")
+                self.end_headers()
+                self.wfile.write(b"Missing 'q' parameter")
         else:
-            # Set response status code for missing parameter
-            self.send_response(400)
-
-            # Set response headers
+            self.send_response(404)
             self.send_header("Content-type", "text/html")
             self.end_headers()
+            self.wfile.write(b"Not Found")
 
-            # Send the error message
-            self.wfile.write(b"Missing 'sentence' parameter")
+    def do_POST(self):
+        parsed_url = urlparse(self.path)
+
+        if parsed_url.path == "/add":
+            content_length = int(self.headers["Content-Length"])
+            post_data = self.rfile.read(content_length)
+            message_data = json.loads(post_data)
+
+            # Create a new Message instance from the received data
+            message = Message(
+                id=message_data["id"],
+                author=message_data["author"],
+                content=message_data["content"],
+                timestamp=message_data["timestamp"],
+                channelId=message_data["channelId"],
+                sequence=message_data["sequence"],
+            )
+
+            memory.put(message)
+
+            self.send_response(200)
+            self.send_header("Content-type", "text/html")
+            self.end_headers()
+            self.wfile.write(b"Message added successfully")
+        else:
+            self.send_response(404)
+            self.send_header("Content-type", "text/html")
+            self.end_headers()
+            self.wfile.write(b"Not Found")
 
 
 # Create an HTTP server

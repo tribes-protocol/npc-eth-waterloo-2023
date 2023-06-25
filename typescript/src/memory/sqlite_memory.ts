@@ -2,7 +2,6 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import sqlite3 from 'sqlite3'
-import { ProofAPI } from '../networking/proof_api'
 import { ChannelId, EthWalletAddress, Message, asMessage } from '../shared/types'
 
 export class SqliteMemory {
@@ -67,7 +66,7 @@ export class SqliteMemory {
     })
   }
 
-  private async getMessagePosition(channelId: ChannelId): Promise<number> {
+  async getMessagePosition(channelId: ChannelId): Promise<number> {
     return new Promise<number>((resolve, reject) => {
       const getPositionQuery = "SELECT position FROM message_positions WHERE channelId = ?"
 
@@ -86,38 +85,7 @@ export class SqliteMemory {
     })
   }
 
-  async sync(channelId: ChannelId) {
-    try {
-      const batchSize = 50
-      let messages: Message[] = []
-      let cursor: string | undefined
-      let highestSequenceNumber: number = await this.getMessagePosition(channelId)
-
-      do {
-        const result = await ProofAPI.getMessages(channelId, batchSize, cursor)
-        cursor = result.cursor
-        messages = result.messages
-
-        for (const message of messages) {
-          if (message.sequence < highestSequenceNumber) {
-            cursor = undefined
-            break
-          }
-          await this.put(message) // Store the message in the database
-          highestSequenceNumber = Math.max(highestSequenceNumber, message.sequence)
-        }
-      } while (cursor)
-
-      // put highest message into table
-      await this.putPosition(channelId, highestSequenceNumber)
-
-    } catch (e: any) {
-      console.error(`Error syncing channel ${channelId.raw}: ${e.message} `, e)
-    }
-  }
-
-
-  private async putPosition(channelId: ChannelId, sequence: number): Promise<void> {
+  async putMessagePosition(channelId: ChannelId, sequence: number): Promise<void> {
     return new Promise((resolve, reject) => {
       const insertQuery = `
       INSERT or REPLACE INTO message_positions (channelId, position)

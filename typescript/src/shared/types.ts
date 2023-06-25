@@ -98,6 +98,14 @@ export class ChannelId {
   readonly raw: string
   readonly root: string
 
+  toJSON(): string {
+    return this.raw
+  }
+
+  toString(): string {
+    return this.raw
+  }
+
   constructor(raw: string) {
     this.raw = raw
     this.root = raw.split('/')[0]

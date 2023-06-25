@@ -1,2 +1,4 @@
 sentence-transformers==2.2.2
 numpy==1.25.0
+chromadb==0.3.26
+InstructorEmbedding==1.0.1

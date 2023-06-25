@@ -3,7 +3,7 @@ import { keccak256 } from '../cryptography/keccak256'
 import { asString, isNull } from '../shared/functions'
 import { ChannelId, EthWalletAddress, Message } from '../shared/types'
 
-export class ChromaMemory {
+export class OpenAIChromaMemory {
   private readonly chroma: ChromaClient
 
   constructor() {
