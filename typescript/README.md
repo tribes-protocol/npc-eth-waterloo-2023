@@ -1,13 +1,13 @@
 # npc
 EIP 6551 NPC framework
-  
+
 ## Getting Started
 1. Install all dependencies
 ```bash
 # from the root directory run the following command
 yarn install
 ```
-2. Install docker
+2. Install docker desktop from https://docs.docker.com/desktop/
 
 ### Configuring the NPC
 1. Create and setup the `.env` file`

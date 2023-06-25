@@ -156,7 +156,7 @@ export class NPC {
     const deviceSignature = Secp256k1.signMessage(msgToSign.message, device)
     const jwt = await AccountAPI.login(msgToSign.message, signature, deviceSignature)
     const websocket = new WebSocketConnection(kTribesWSAPI)
-    const memory = await Memory.create(account.value)
+    const memory = await Memory.create(account)
     const npc = new NPC({
       nft: {
         chainId: nftChainId,

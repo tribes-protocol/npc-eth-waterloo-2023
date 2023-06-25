@@ -1,22 +1,30 @@
+import { ChromaClient, OpenAIEmbeddingFunction } from 'chromadb'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import sqlite3 from 'sqlite3'
+import { keccak256 } from '../cryptography/keccak256'
 import { ProofAPI } from '../networking/proof_api'
-import { ChannelId, Message, asMessage } from './types'
+import { asString, isNull } from './functions'
+import { ChannelId, EthWalletAddress, Message, asMessage } from './types'
 
 export class Memory {
   private readonly db: sqlite3.Database
+  private readonly chroma: ChromaClient
+  private readonly account: EthWalletAddress
 
-  static async create(uuid: string): Promise<Memory> {
-    const instance = new Memory(uuid)
-    await instance.setupDB()
+  static async create(account: EthWalletAddress): Promise<Memory> {
+    const instance = new Memory(account)
+    await instance.setupSqlite()
     return instance
   }
 
-  private constructor(uuid: string) {
+  private constructor(account: EthWalletAddress) {
+    const uuid = account.value
     const dirPath = path.join(os.homedir(), '.npc')
     const dbPath = path.join(dirPath, `${uuid}.db`)
+
+    this.account = account
 
     // check if directory does not exist
     if (!fs.existsSync(dirPath)) {
@@ -31,9 +39,13 @@ export class Memory {
       }
       console.log('Connected to the local SQLite database.')
     })
+
+    // chromadb
+    this.chroma = new ChromaClient()
   }
 
-  private async setupDB(): Promise<void> {
+
+  private async setupSqlite(): Promise<void> {
     const createTableQuery = `
     CREATE TABLE IF NOT EXISTS message (
       id VARCAR(255) NOT NULL PRIMARY KEY,
@@ -113,28 +125,8 @@ export class Memory {
     }
   }
 
-  async search(channelId: ChannelId, query: string, limit: number): Promise<Message[]> {
-    return new Promise((resolve, reject) => {
-      const searchQuery = `
-      SELECT * FROM message WHERE channelId = ? AND content LIKE ? LIMIT ?
-        `
 
-      const searchParam = `%${query}%`
-      this.db.all(
-        searchQuery,
-        [channelId.raw, searchParam, limit],
-        (error, rows: { [key: string]: any }[]) => {
-          if (error) {
-            reject(error)
-          } else {
-            const messages: Message[] = rows.map(asMessage)
-            resolve(messages)
-          }
-        })
-    })
-  }
-
-  async putPosition(channelId: ChannelId, sequence: number): Promise<void> {
+  private async putPosition(channelId: ChannelId, sequence: number): Promise<void> {
     return new Promise((resolve, reject) => {
       const insertQuery = `
       INSERT or REPLACE INTO message_positions (channelId, position)
@@ -160,8 +152,17 @@ export class Memory {
     })
   }
 
+  private async chromaCollectionForChannelId(channelId: ChannelId) {
+    const computedChannelId = keccak256(channelId.raw.split('/')[0]).substring(0, 62)
+    const name = `c${computedChannelId}`
+    const apiKey = asString(process.env.OPENAI_API_KEY)
+    const embeddingFunction = new OpenAIEmbeddingFunction({ openai_api_key: apiKey })
+    const collection = await this.chroma.getOrCreateCollection({ name, embeddingFunction })
+    return collection
+  }
+
   async put(data: Message): Promise<void> {
-    return new Promise((resolve, reject) => {
+    const putSqlite = new Promise<void>((resolve, reject) => {
       const insertQuery = `
           INSERT OR IGNORE INTO message(id, author, content, timestamp, channelId, sequence)
       VALUES(?, ?, ?, ?, ?, ?)
@@ -179,9 +180,118 @@ export class Memory {
         }
       })
     })
+      .catch((error) => console.error('Unable to insert to sqlite', error))
+
+    const collection = await this.chromaCollectionForChannelId(data.channelId)
+    const ids = [data.id]
+    const metadatas = [{
+      author: data.author.value,
+      channelId: data.channelId.raw,
+      timestamp: data.timestamp,
+      sequence: data.sequence
+    }]
+
+    const documents = [data.content]
+    const putChroma = collection.add({ ids, metadatas, documents })
+      .catch((error) => console.error('Unable to insert to chroma', error))
+
+    await Promise.all([putSqlite, putChroma])
   }
 
-  async getRecentMessages(channelId: ChannelId, limit: number, order: 'DESC' | 'ASC'): Promise<Message[]> {
+  async search(channelId: ChannelId, query: string, limit: number): Promise<Message[]> {
+    const [sqliteResults, chromadbResults] = await Promise.all([
+      this.querySqlite(channelId, query, limit),
+      this.queryChromadb(channelId, query, limit)
+    ])
+
+    const uniques = new Map<string, Message>()
+    for (const message of chromadbResults) {
+      uniques.set(message.id, message)
+    }
+    for (const message of sqliteResults) {
+      uniques.set(message.id, message)
+    }
+
+    const results = Array.from(uniques.values())
+    return results
+  }
+
+  private async querySqlite(
+    channelId: ChannelId,
+    query: string,
+    limit: number
+  ): Promise<Message[]> {
+    return new Promise((resolve, reject) => {
+      const searchQuery = `
+      SELECT * FROM message WHERE channelId = ? AND content LIKE ? LIMIT ?
+        `
+
+      const searchParam = `%${query}%`
+      this.db.all(
+        searchQuery,
+        [channelId.raw, searchParam, limit],
+        (error, rows: { [key: string]: any }[]) => {
+          if (error) {
+            reject(error)
+          } else {
+            const messages: Message[] = rows.map(asMessage)
+            resolve(messages)
+          }
+        })
+    })
+  }
+
+  private async queryChromadb(
+    channelId: ChannelId,
+    queryText: string,
+    limit: number
+  ): Promise<Message[]> {
+    const collection = await this.chromaCollectionForChannelId(channelId)
+    const results = await collection.query({ nResults: limit, queryTexts: [queryText] })
+    const total = results.ids[0].length
+
+    if (total === 0) {
+      return []
+    }
+
+    const metadatas = results.metadatas[0]
+    const documents = results.documents[0]
+    const ids = results.ids[0]
+
+    const messages: Message[] = []
+    for (let i = 0; i < total; i++) {
+      const itemMetadata = metadatas[i]
+      const itemDocument = documents[i]
+      const itemId = ids[i]
+
+      if (isNull(itemMetadata) || isNull(itemDocument) || isNull(itemId)) {
+        continue
+      }
+
+      const author = new EthWalletAddress(itemMetadata.author as string)
+      const timestamp = itemMetadata.timestamp as number
+      const channelId = new ChannelId(itemMetadata.channelId as string)
+      const sequence = itemMetadata.sequence as number
+      const content = itemDocument
+
+      messages.push({
+        author,
+        timestamp,
+        channelId,
+        sequence,
+        content,
+        id: itemId
+      })
+    }
+
+    return messages
+  }
+
+  async getRecentMessages(
+    channelId: ChannelId,
+    limit: number,
+    order: 'DESC' | 'ASC'
+  ): Promise<Message[]> {
     return new Promise((resolve, reject) => {
       const selectQuery = `
       SELECT * 
@@ -204,3 +314,4 @@ export class Memory {
   }
 
 }
+
