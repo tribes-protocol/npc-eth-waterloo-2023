@@ -1,0 +1,12 @@
+{
+    "folders": [
+        {
+            "name": "NPC",
+            "path": "typescript"
+        },
+        {
+            "name": "Embedding",
+            "path": "python"
+        }
+    ]
+}
