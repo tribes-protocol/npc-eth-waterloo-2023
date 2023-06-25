@@ -111,7 +111,24 @@ async function pushProof(npc: NPC, channelId: ChannelId, data: any): Promise<str
   }
 }
 
-export async function sendMessage(
+
+async function addReaction(
+  npc: NPC,
+  value: string,
+  messageId: string,
+  channelId: ChannelId
+): Promise<void> {
+  if (value.trim().length === 0) {
+    return
+  }
+  await pushProof(
+    npc,
+    channelId.toReactionChannelId(messageId),
+    { action: 1, type: 'reaction', model: { value, messageId } }
+  )
+}
+
+async function sendMessage(
   npc: NPC,
   text: string,
   channelId: ChannelId,
@@ -134,4 +151,5 @@ export const ProofAPI = {
   getProofs,
   getMessages,
   sendMessage,
+  addReaction,
 }
